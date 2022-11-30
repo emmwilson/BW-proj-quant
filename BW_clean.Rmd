@@ -1,0 +1,357 @@
+---
+title: "BW_clean"
+output: html_document
+---
+
+
+---
+title: "BW_random"
+output: html_document
+---
+
+# load packages and data
+```{r}
+pacman::p_load(
+  tidyverse,
+  readxl,
+  terra,
+  stats,
+  dismo,
+  usdm,
+  corrplot,
+  PerformanceAnalytics,
+  oddsratio,
+  DHARMa,
+  MASS,
+  nlme,
+  mgcv,
+  mgcViz,
+  bibtex)
+
+write.bib(c("tidyverse",
+  "readxl",
+  "terra",
+  "stats",
+  "dismo",
+  "usdm",
+  "corrplot",
+  "PerformanceAnalytics",
+  "oddsratio",
+  "DHARMa",
+  "MASS",
+  "nlme",
+  "mgcv",
+  "mgcViz",
+  "bibtex"), file = "Rpackages.bib")
+
+
+setwd("~/Documents/Master's/Quantitative Biology/BW_proj")
+getwd()
+env_r_all_na <- read_excel(path = "./Zhang2022RasterDataLayers/random_pt_xy.xlsx")
+env_d_all_na <- read_excel(path = "./Zhang2022RasterDataLayers/defol_pt_xy.xlsx")
+```
+
+# prep data
+### remove NAs
+```{r echo=TRUE}
+env_r_all <- env_r_all_na[complete.cases(env_r_all_na), ]
+env_d_all <- env_d_all_na[complete.cases(env_d_all_na), ]
+```
+
+### create same number of samples for each data set
+chose 600 bc largest common centennial 
+```{r}
+env_r <- env_r_all[sample(nrow(env_r_all), 2400), ]
+env_d <- env_d_all[sample(nrow(env_d_all), 2400), ]
+```
+
+### combine onto one dataframe
+```{r}
+# make column specifying defoliation points
+env_r$r_d <- c(rep(1, length(env_r$pcp0708)))
+
+# make column specifying random points
+env_d$r_d <- c(rep(0, length(env_d$pcp0708)))
+
+
+# combine and drop columns not common to both and environmental variables not using
+bw_env <- rbind(env_d[intersect(names(env_d),names(env_r))],env_r[intersect(names(env_d),names(env_r))])
+bw_env <- bw_env[, -c(3, 5, 18, 21)]
+# make tree type (SpRasterNA) categorical
+bw_env<- filter(bw_env, SpRasterNA != 4)
+bw_env$SpRasterNA <- as.factor(bw_env$SpRasterNA)
+
+```
+
+# correlation analysis
+```{r}
+##check Multicollinearity - between 14 predictors
+predictors_num <- bw_env[, -c(3,18)]
+# correlation structure
+varCor <- cor(predictors_num)
+corrplot(varCor,  tl.col='black')
+chart.Correlation(varCor, histogram=F, pch=19)
+
+
+# clustering with dendrogram
+allDistNew <- abs(as.dist(cor(predictors_num)))
+allClusNew <- hclust(1 - allDistNew)
+plot(allClusNew, hang=-1)
+
+# Variance Inflation Factor
+usdm::vif(as.data.frame(predictors_num))
+```
+
+### remove variables
+```{r}
+# keep MaxT0506 and pcp0607 bc biologically relevant
+## remove all but one MaxT (0506), remove sg_date and sg__gdd_p2, minT0607 and minT0708
+predictors_num_sel <- predictors_num[,-c(3,4,9,10,12,13)]
+
+# retry
+## correlation structure
+varCor_sel <- cor(predictors_num_sel)
+corrplot(varCor_sel,  tl.col='black')
+chart.Correlation(varCor_sel, histogram=F, pch=19)
+
+## clustering with dendrogram
+allDistNew_sel <- abs(as.dist(cor(predictors_num_sel)))
+allClusNew_sel <- hclust(1 - allDistNew_sel)
+plot(allClusNew_sel, hang=-1)
+
+## VIF
+usdm::vif(as.data.frame(predictors_num_sel))
+
+## pcps still very correlated so maybe remove next highest which is pcp0708 and is correlated with X, also remove pcp0506 bc correlated with Y, keeping pcp0607 makes sense beyond biological pretense because the least with lat/long
+
+# retry #2
+predictors_num_sel2 <- predictors_num_sel[,-c(4,6)]
+
+## correlation structure
+varCor_sel2 <- cor(predictors_num_sel2)
+corrplot(varCor_sel2, tl.col = "black")
+chart.Correlation(varCor_sel2, histogram=F, pch=19)
+
+## clustering with dendrogram
+allDistNew_sel2 <- abs(as.dist(cor(predictors_num_sel2)))
+allClusNew_sel2 <- hclust(1 - allDistNew_sel2)
+plot(allClusNew_sel2, hang=-1)
+
+## VIF
+usdm::vif(as.data.frame(predictors_num_sel2))
+
+pred_final <- predictors_num_sel2
+```
+
+# create data frame with final variables, tree species, and x/y coordinateas
+```{r}
+final_names <- c(names(pred_final), "r_d", "SpRasterNA")
+str(final_names)
+bw_env_f <- bw_env[ ,names(bw_env) %in% final_names]
+```
+
+```{r}
+final_names_xy <- c(names(pred_final), "r_d", "SpRasterNA", "X", "Y")
+str(final_names_xy)
+bw_env_xy <- bw_env[ ,names(bw_env) %in% final_names_xy]
+```
+
+# GLM
+```{r echo=TRUE}
+m_1 <- glm(r_d ~  MaxT0506 + MinT0506 + pcp0607 + sg__gdd_p1 + DistanceRo + DistanceRi + SpRasterNA - 1, data = bw_env_xy, family = binomial(link = "logit"))
+summary(m_1)
+
+## check if type 3 - ctrl for each level of variable not just variable above by including variables in different order
+ m_test1 <- glm(r_d ~  MinT0506 + pcp0607 +MaxT0506 - 1, data = bw_env_xy, family = binomial(link = "logit"))
+summary(m_test1)
+ m_test2 <- glm(r_d ~ MaxT0506+ pcp0607 +MinT0506 - 1, data = bw_env_xy, family = binomial(link = "logit"))
+summary(m_test2)
+```
+
+## plot residuals against fitted
+about DHARMa:
+"The ‘DHARMa’ package uses a simulation-based approach to create readily interpretable scaled (quantile) residuals for fitted (generalized) linear mixed models.
+The resulting residuals are standardized to values between 0 and 1 and can be interpreted as intuitively as residuals from a linear regression. The package also provides a number of plot and test functions for typical model misspecification problems, such as over/underdispersion, zero-inflation, and residual spatial and temporal autocorrelation.
+
+To interpret the residuals, remember that a scaled residual value of 0.5 means that half of the simulated data are higher than the observed value, and half of them lower. A value of 0.99 would mean that nearly all simulated data are lower than the observed value. The minimum/maximum values for the residuals are 0 and 1. For a correctly specified model we would expect asymptotically a uniform (flat) distribution of the scaled residuals & uniformity in y direction if we plot against any predictor."
+(Hartig 2022)
+```{r}
+sim_res <- simulateResiduals(fittedModel = m_1, plot = F)
+plot(sim_res, quantreg=T)   # normal along Q-Q plot
+#red quantile lines mean significant deviation from straight line
+jpeg("QQ-plot.jpg", width = 11, height =11, units = "cm", res = 1200, pointsize = 12)
+plotQQunif(simulationOutput = sim_res, 
+           testDispersion = FALSE,
+           testUniformity = FALSE,
+           testOutliers = FALSE)
+dev.off()
+
+jpeg("res-fitted plot.jpg", width = 11, height =11, units = "cm", res = 1200, pointsize = 12)
+plotResiduals(sim_res, quantreg = T, colour = "black")
+dev.off()
+
+
+# check for outliers
+outliers(sim_res)
+
+# test to see where pattern is coming from
+plotResiduals(sim_res, bw_env_f$sg__gdd_p1)
+# sg_gdd_p1 good
+plotResiduals(sim_res, bw_env_f$pcp0607)
+# pcp0607 good
+plotResiduals(sim_res, bw_env_f$MinT0506)
+# MinT0708 quite bad
+plotResiduals(sim_res, bw_env_f$MaxT0506)
+# MaxT0506 good
+plotResiduals(sim_res, bw_env_f$DistanceRo)
+# DistanceRo not great fror 0.5 and 0.75
+plotResiduals(sim_res, bw_env_f$DistanceRi)
+# DistanceRi good
+plotResiduals(sim_res, bw_env_f$SpRasterNA, asFactor = T)
+# SpRasterNA good
+
+# test autocorrelation
+testSpatialAutocorrelation(simulationOutput = sim_res, x = bw_env_xy$X, y= bw_env_xy$Y)
+# very significant
+# plot against locations
+plotResiduals(sim_res, bw_env_xy$X)
+plotResiduals(sim_res, bw_env_xy$Y)
+
+# residuals aren't homogenous
+
+# plot against lag
+acf(m_1$residuals, lag.max = 5000)
+## pattern in the residuals  (likely spatial autocorrelation)
+jpeg("lagplot glm.jpg", width = 11, height =10, units = "cm", res = 1200, pointsize = 12)
+acf(m_1$residuals, lag.max = 5000, main = " ")
+dev.off()
+
+
+# these variables have pattern in similarity
+acf(bw_env_xy$pcp0607, lag.max = 5000)
+acf(bw_env_f$MaxT0506, lag.max = 5000)
+acf(bw_env_xy$DistanceRo, lag.max = 5000)
+
+# these variables are mediocre
+acf(bw_env_xy$DistanceRi, lag.max = 5000)
+acf(bw_env_xy$MinT0506, lag.max = 5000)
+
+# these are fine
+acf(bw_env_xy$sg__gdd_p1, lag.max = 5000)
+acf(bw_env_xy$X, lag.max = 5000)
+acf(bw_env_xy$Y, lag.max = 5000)
+```
+
+# comapre GLMs 
+models to test
+full model:
+r_d ~ MaxT0506 + MinT0506 + pcp0607 + Sg__gdd_p1 + DistanceRo + DistanceRi + SpRasterNA
+reduced model:
+r_d ~ prp0607 + MaxT0506 + MinT0506 + DistanceRo + DistanceRi
+reduced w tree:
+r_d ~ prp0607 + MaxT0506 + MinT0506 + DistanceRo + DistanceRi + SpRasterNA
+Tree only:
+r_d ~ SpRasterNA
+biological models:
+r_d ~ MaxT0506 + pcp0607 + SpRasterNA
+r_d ~ MaxT0506 + pcp0607
+
+```{r}
+m_1
+m_2 <- glm(r_d ~ SpRasterNA - 1, data = bw_env_f, family = binomial(link = "logit"))
+m_3 <- glm(r_d ~ MaxT0506 + pcp0607 - 1, data = bw_env_f, family = binomial(link = "logit"))
+m_4 <- glm(r_d ~ MaxT0506 + pcp0607 + SpRasterNA - 1, data = bw_env_f, family = binomial(link = "logit"))
+m_5 <- glm(r_d ~ pcp0607 + MaxT0506 + MinT0506 + DistanceRo + DistanceRi - 1, data = bw_env_f, family = binomial(link = "logit"))
+m_6 <- glm(r_d ~ pcp0607 + MaxT0506 + MinT0506 + DistanceRo + DistanceRi + SpRasterNA - 1, data = bw_env_f, family = binomial(link = "logit"))
+
+BW_models <- list()
+BW_models[["m_1"]] <- m_1
+BW_models[["m_2"]] <- m_2
+BW_models[["m_3"]] <- m_3
+BW_models[["m_4"]] <- m_4
+BW_models[["m_5"]] <- m_5
+BW_models[["m_6"]] <- m_6
+
+modname_BW_models <- paste(names(BW_models))
+
+# get table
+library(AICcmodavg)
+print(aictab(cand.set = BW_models, modnames = modname_BW_models, sort = TRUE), digits = 3, LL = TRUE)
+
+summary(m_1)
+summary(m_5)
+summary(m_6)
+summary(m_2)
+```
+
+# GAM
+```{r}
+# trial with reduced model
+gm_2 <- gam(r_d ~ SpRasterNA + s(X, Y) -1, data = bw_env_xy, family = binomial)
+summary(gm_2)     # smooth term significant 
+
+# full model
+gm_1 <- gam(r_d ~ MaxT0506 + MinT0506 + pcp0607 + sg__gdd_p1 + DistanceRo + DistanceRi + SpRasterNA + s(X, Y) - 1, data = bw_env_xy, family = binomial(link = "logit"))
+
+# check residuals
+sim_resg <- simulateResiduals(fittedModel = gm_1, plot = F)
+
+
+plot(sim_resg, quantreg=T)    #better
+jpeg("QQ-plot gam.jpg", width = 11, height =11, units = "cm", res = 1200, pointsize = 12)
+plotQQunif(simulationOutput = sim_resg, 
+           testDispersion = FALSE,
+           testUniformity = FALSE,
+           testOutliers = FALSE)
+dev.off()
+
+jpeg("res-fitted gam plot.jpg", width = 11, height =11, units = "cm", res = 1200, pointsize = 12)
+plotResiduals(sim_resg, quantreg = T)
+dev.off()
+
+# plot against explain variables
+plotResiduals(sim_resg, bw_env_f$sg__gdd_p1)
+# sg_gdd_p1 good
+plotResiduals(sim_resg, bw_env_f$pcp0607)
+# pcp0607 good
+plotResiduals(sim_resg, bw_env_f$MinT0506)
+# MinT0708 quite bad
+plotResiduals(sim_resg, bw_env_f$MaxT0506)
+# MaxT0506 good
+plotResiduals(sim_resg, bw_env_f$DistanceRo)
+# DistanceRo not great fror 0.5 and 0.75
+plotResiduals(sim_resg, bw_env_f$DistanceRi)
+# DistanceRi good
+plotResiduals(sim_resg, bw_env_f$SpRasterNA, asFactor = T)
+
+acf(gm_2$residuals, lag.max = 5000)
+# lowered the correlation from ~0.8 to ~0.6
+
+jpeg("lagplot gam.jpg", width = 11, height =10, units = "cm", res = 1200, pointsize = 12)
+acf(gm_1$residuals, lag.max = 5000, main = " ")
+dev.off()
+
+```
+
+# run GAMs
+1: full model
+2: only tree speceis
+3: only previous biologically relevant variables
+4: previous biologically relevant variables and tree species
+5: reduced model based on significant factors
+6: reduced model based on significant factors and tree species
+```{r}
+gm_3 <- gam(r_d ~ MaxT0506 + pcp0607 + s(X, Y) - 1, data = bw_env_xy, family = binomial(link = "logit"))
+gm_4 <- gam(r_d ~ MaxT0506 + pcp0607 + SpRasterNA + s(X, Y) - 1, data = bw_env_xy, family = binomial(link = "logit"))
+gm_5 <- gam(r_d ~ pcp0607 + MaxT0506 + DistanceRo + DistanceRi + s(X, Y) - 1, data = bw_env_xy, family = binomial(link = "logit"))
+gm_6 <- gam(r_d ~ pcp0607 + MaxT0506 + DistanceRo + DistanceRi + SpRasterNA + s(X, Y) - 1, data = bw_env_xy, family = binomial(link = "logit"))
+
+AIC(gm_1, gm_2, gm_3, gm_4, gm_5, gm_6)
+
+summary(gm_1)
+summary(gm_2)
+summary(gm_3)
+summary(gm_4)
+summary(gm_6)
+summary(gm_5)
+```

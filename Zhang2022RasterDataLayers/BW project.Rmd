@@ -1,0 +1,29 @@
+---
+title: "BW project"
+output: html_document
+---
+```{r}
+library(terra)
+```
+
+
+
+Getting data
+```{r}
+setwd("~/Documents/Master's/Ecological forecasting/Zhang2022RasterDataLayers")
+
+#16 a priori variables
+
+filenames <- c("slopeRaster.tif", "aspectRaster.tif", "elevationRaster.tif", "MaxT0506.tif", "MaxT0607.tif", "MaxT0708.tif", "MinT0506.tif", "MinT0607.tif", "MinT0708.tif", "pcp0506.tif", "pcp0607.tif", "pcp0708.tif", "sg__gdd_p1.tif", "sg__gdd_p2.tif", "sg_date.tif", "slopeRaster.tif", "SpRasterNA.tif")
+r <- c()
+rast_list <- as.list(filenames)
+
+for (i in 1:length(filenames)) {
+    r <- filenames[[i]]
+    rast_r <- rast(r)
+    assign(r, rast_r)
+}
+
+slopeRaster.tif
+```
+
