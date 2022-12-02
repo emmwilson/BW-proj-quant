@@ -175,7 +175,7 @@ The resulting residuals are standardized to values between 0 and 1 and can be in
 
 To interpret the residuals, remember that a scaled residual value of 0.5 means that half of the simulated data are higher than the observed value, and half of them lower. A value of 0.99 would mean that nearly all simulated data are lower than the observed value. The minimum/maximum values for the residuals are 0 and 1. For a correctly specified model we would expect asymptotically a uniform (flat) distribution of the scaled residuals & uniformity in y direction if we plot against any predictor."
 (Hartig 2022)
-```{r}
+```{r echo=TRUE}
 sim_res <- simulateResiduals(fittedModel = m_1, plot = F)
 plot(sim_res, quantreg=T)   # normal along Q-Q plot
 #red quantile lines mean significant deviation from straight line
